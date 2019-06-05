@@ -34,16 +34,19 @@ set :root, Dir.pwd
 set :sprockets,     Sprockets::Environment.new(settings.root)
 set :assets_prefix, '/assets'
 set :digest_assets, false
-set server: 'thin', connections: [], history_file: 'history.yml'
+set :server, 'thin'
+set :connections, []
+set :history_file, 'history.yml'
 set :public_folder, File.join(settings.root, 'public')
 set :views, File.join(settings.root, 'dashboards')
 set :default_dashboard, nil
 set :auth_token, nil
+set :template_languages, %i[html erb]
 
-if File.exists?(settings.history_file)
-  set history: YAML.load_file(settings.history_file)
+if File.exist?(settings.history_file)
+  set :history, YAML.load_file(settings.history_file)
 else
-  set history: {}
+  set :history, {}
 end
 
 %w(javascripts stylesheets fonts images).each do |path|
@@ -55,7 +58,7 @@ end
 end
 
 not_found do
-  send_file File.join(settings.public_folder, '404.html'), status: 404
+  send_file File.join(settings.public_folder, '404.html'), :status => 404
 end
 
 at_exit do
@@ -70,7 +73,7 @@ get '/' do
   redirect "/" + dashboard
 end
 
-get '/events', provides: 'text/event-stream' do
+get '/events', :provides => 'text/event-stream' do
   protected!
   response.headers['X-Accel-Buffering'] = 'no' # Disable buffering for nginx
   stream :keep_open do |out|
@@ -82,9 +85,9 @@ end
 
 get '/:dashboard' do
   protected!
-  tilt_html_engines.each do |suffix, _|
-    file = File.join(settings.views, "#{params[:dashboard]}.#{suffix}")
-    return render(suffix.to_sym, params[:dashboard].to_sym) if File.exist? file
+  settings.template_languages.each do |language|
+    file = File.join(settings.views, "#{params[:dashboard]}.#{language}")
+    return render(language, params[:dashboard].to_sym) if File.exist?(file)
   end
 
   halt 404
@@ -117,10 +120,12 @@ end
 
 get '/views/:widget?.html' do
   protected!
-  tilt_html_engines.each do |suffix, engines|
-    file = File.join(settings.root, "widgets", params[:widget], "#{params[:widget]}.#{suffix}")
-    return engines.first.new(file).render if File.exist? file
+  settings.template_languages.each do |language|
+    file = File.join(settings.root, "widgets", params[:widget], "#{params[:widget]}.#{language}")
+    return Tilt[language].new(file).render if File.exist?(file)
   end
+
+  "Drats! Unable to find a widget file named: #{params[:widget]} to render."
 end
 
 Thin::Server.class_eval do
@@ -135,7 +140,7 @@ end
 
 def send_event(id, body, target=nil)
   body[:id] = id
-  body[:updatedAt] ||= Time.now.to_i
+  body[:updatedAt] ||= (Time.now.to_f * 1000.0).to_i 
   event = format_event(body.to_json, target)
   Sinatra::Application.settings.history[id] = event unless target == 'dashboards'
   Sinatra::Application.settings.connections.each { |out| out << event }
@@ -148,7 +153,7 @@ def format_event(body, name=nil)
 end
 
 def latest_events
-  settings.history.inject("") do |str, (id, body)|
+  settings.history.inject("") do |str, (_id, body)|
     str << body
   end
 end
@@ -159,13 +164,6 @@ def first_dashboard
   files.sort.first
 end
 
-def tilt_html_engines
-  Tilt.mappings.select do |_, engines|
-    default_mime_type = engines.first.default_mime_type
-    default_mime_type.nil? || default_mime_type == 'text/html'
-  end
-end
-
 def require_glob(relative_glob)
   Dir[File.join(settings.root, relative_glob)].each do |file|
     require file
@@ -173,7 +171,7 @@ def require_glob(relative_glob)
 end
 
 settings_file = File.join(settings.root, 'config/settings.rb')
-require settings_file if File.exists?(settings_file)
+require settings_file if File.exist?(settings_file)
 
 {}.to_json # Forces your json codec to initialize (in the event that it is lazily loaded). Does this before job threads start.
 job_path = ENV["JOB_PATH"] || 'jobs'

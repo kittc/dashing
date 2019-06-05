@@ -24,6 +24,21 @@ Batman.Filters.shortenedNumber = (num) ->
   else
     num
 
+Batman.Filters.shortenedBytes = (num) ->
+  return num if isNaN(num)
+  if num >= (1125899906842624)
+    (num / 1125899906842624).toFixed(1) + 'PB'
+  else if num >= (1099511627776)
+    (num / 1099511627776).toFixed(1) + 'TB'
+  else if num >= (1073741824)
+    (num / 1073741824).toFixed(1) + 'GB'
+  else if num >= (1048576)
+    (num / 1048576).toFixed(1) + 'MB'
+  else if num >= (1024)
+    (num / 1024).toFixed(1) + 'KB'
+  else
+    (num).toFixed(1) + 'B'
+
 class window.Dashing extends Batman.App
   @on 'reload', (data) ->
     window.location.reload(true)
@@ -46,7 +61,7 @@ class Dashing.Widget extends Batman.View
 
   @accessor 'updatedAtMessage', ->
     if updatedAt = @get('updatedAt')
-      timestamp = new Date(updatedAt * 1000)
+      timestamp = new Date(updatedAt)
       hours = timestamp.getHours()
       minutes = ("0" + timestamp.getMinutes()).slice(-2)
       "Last updated at #{hours}:#{minutes}"
@@ -57,15 +72,21 @@ class Dashing.Widget extends Batman.View
     # In case the events from the server came before the widget was rendered
     lastData = Dashing.lastEvents[@id]
     if lastData
+      lastData = @select(lastData)
       @mixin(lastData)
       @onData(lastData)
 
   receiveData: (data) =>
+    data = @select(data)
     @mixin(data)
     @onData(data)
 
   onData: (data) =>
     # Widgets override this to handle incoming data
+
+  select: (data) =>
+    # Widgets override this to transform data before it is applied to the model
+    return data
 
 Dashing.AnimatedValue =
   get: Batman.Property.defaultAccessor.get
